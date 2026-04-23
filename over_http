@@ -13,18 +13,78 @@ JSON + CSV + TXT output
 
 
 import urllib.request
+import urllib.parse
 import json
+from datetime import datetime, timezone
 
-domain = "example.com"
+# Approved issuers
+APPROVED_CA_IDS = {
+    172211,
+    30252,
+    107462,
+    163648
+}
 
-url = f"https://crt.sh/?q={domain}&output=json"
+domain = "agenziadb.it"
 
-print("Fetching:", url)
 
-with urllib.request.urlopen(url, timeout=20) as r:
-    data = json.loads(r.read().decode())
+def cert_valid(cert):
+    nb = datetime.fromisoformat(
+        cert["not_before"].replace("Z","+00:00")
+    )
 
-print("Returned rows:", len(data))
+    na = datetime.fromisoformat(
+        cert["not_after"].replace("Z","+00:00")
+    )
 
-if data:
-    print("Sample keys:", data[0].keys())
+    now = datetime.now(timezone.utc)
+
+    return nb <= now <= na
+
+
+url = (
+    "https://crt.sh/?q="
+    + urllib.parse.quote(domain)
+    + "&output=json"
+)
+
+print("Fetching", url)
+
+with urllib.request.urlopen(url) as r:
+    rows = json.loads(r.read().decode())
+
+print("Rows returned:", len(rows))
+
+
+seen = set()
+
+for cert in rows:
+
+    cert_id = cert["id"]
+
+    if cert_id in seen:
+        print("Duplicate cert:", cert_id)
+        continue
+
+    seen.add(cert_id)
+
+    ca_id = int(cert["issuer_ca_id"])
+
+    # skip approved CAs
+    if ca_id in APPROVED_CA_IDS:
+        continue
+
+    # skip expired / not yet valid
+    if not cert_valid(cert):
+        continue
+
+    print()
+    print("VIOLATION FOUND")
+    print("Cert ID:", cert_id)
+    print("Issuer CA ID:", ca_id)
+    print("Issuer:", cert["issuer_name"])
+    print("Serial:", cert["serial_number"])
+    print("Valid from:", cert["not_before"])
+    print("Valid to:", cert["not_after"])
+    print("Domains:")
+    print(cert["name_value"])
