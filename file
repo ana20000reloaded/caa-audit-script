@@ -1,3 +1,20 @@
+import socket
+
+HOST = "crt.sh"
+PORT = 5432
+
+print(f"Testing TCP connection to {HOST}:{PORT} ...")
+
+try:
+    s = socket.create_connection((HOST, PORT), timeout=10)
+    print("SUCCESS: Port is reachable")
+    s.close()
+
+except Exception as e:
+    print("FAILED:", e)
+
+
+
 domains.txt (12k domains)
     ↓
 batching (200 domains per query)
