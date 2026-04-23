@@ -1,5 +1,54 @@
-print(rows[0]["not_before"])
-print(rows[0]["not_after"])
+def cert_currently_valid(cert):
+    """
+    Python 3.6 compatible parsing for crt.sh timestamps.
+    Handles:
+      2025-03-01T12:30:00
+      2025-03-01T12:30:00.123
+    """
+
+    try:
+
+        try:
+            nb = datetime.strptime(
+                cert["not_before"],
+                "%Y-%m-%dT%H:%M:%S"
+            )
+
+            na = datetime.strptime(
+                cert["not_after"],
+                "%Y-%m-%dT%H:%M:%S"
+            )
+
+        except ValueError:
+
+            # fallback if fractional seconds exist
+            nb = datetime.strptime(
+                cert["not_before"],
+                "%Y-%m-%dT%H:%M:%S.%f"
+            )
+
+            na = datetime.strptime(
+                cert["not_after"],
+                "%Y-%m-%dT%H:%M:%S.%f"
+            )
+
+        now = datetime.utcnow()
+
+        return nb <= now <= na
+
+    except Exception as e:
+
+        print(
+            "Date parse error:",
+            e,
+            cert["not_before"],
+            cert["not_after"]
+        )
+
+        return False
+
+
+
 
 
 """
