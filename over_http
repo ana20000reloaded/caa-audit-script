@@ -1,24 +1,25 @@
-except urllib.error.HTTPError as e:
+fetch_failed = set()
 
-    if e.code in (404,502,504):
+no_certs = set()
 
-        print(
-            f"{e.code} retry "
-            f"in {delay}s"
-        )
+no_violations = set()
 
-        time.sleep(delay)
+domains_with_violations = set()
 
-        delay *= 2
 
-        continue
+if status == "failed":
 
-    print(
-        "HTTP error",
-        e.code,
-        "for",
-        domain,
-        "- skipping"
-    )
+    print("FETCH FAILED:", domain)
 
-    return []
+    fetch_failed.add(domain)
+
+    continue
+
+
+if status == "ok" and len(rows) == 0:
+
+    print("NO CERTIFICATES:", domain)
+
+    no_certs.add(domain)
+
+    continue
