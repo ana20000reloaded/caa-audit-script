@@ -1,25 +1,7 @@
-fetch_failed = set()
-
-no_certs = set()
-
-no_violations = set()
-
-domains_with_violations = set()
-
-
-if status == "failed":
-
-    print("FETCH FAILED:", domain)
-
-    fetch_failed.add(domain)
-
-    continue
-
-
-if status == "ok" and len(rows) == 0:
-
-    print("NO CERTIFICATES:", domain)
-
-    no_certs.add(domain)
-
-    continue
+print()
+print("SUMMARY")
+print("-------")
+print("Fetch failed:", len(fetch_failed))
+print("No certificates:", len(no_certs))
+print("No violations:", len(no_violations))
+print("Domains with violations:", len(domains_with_violations))
