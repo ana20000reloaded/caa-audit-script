@@ -1,23 +1,40 @@
-domains.txt
-  ↓
-batch / loop (one domain at a time)
-  ↓
-https://crt.sh/?q=<domain>&output=json
-  ↓
-filter locally:
-   - valid cert only
-   - issuer not approved
-   - deduplicate by certificate ID
-  ↓
-JSON + CSV + TXT output
+"""
+Annual CAA Audit via crt.sh HTTPS API
 
+Find certificates for your domains that are issued
+by non-approved CAs.
+
+Resilient for flaky crt.sh (502/504)
+Includes:
+- retries
+- checkpointing
+- deduplication
+- exports
+"""
 
 import urllib.request
 import urllib.parse
+import urllib.error
 import json
+import csv
+import time
+import os
+
 from datetime import datetime, timezone
 
-# Approved issuers
+
+# ===================================
+# CONFIG
+# ===================================
+
+INPUT_FILE = "domains.txt"
+
+JSON_OUTPUT = "violations.json"
+CSV_OUTPUT = "violations.csv"
+TXT_OUTPUT = "bad_domains.txt"
+
+CHECKPOINT_FILE = "checkpoint.json"
+
 APPROVED_CA_IDS = {
     172211,
     30252,
@@ -25,66 +42,413 @@ APPROVED_CA_IDS = {
     163648
 }
 
-domain = "agenziadb.it"
+SLEEP_BETWEEN_DOMAINS = 1
 
 
-def cert_valid(cert):
-    nb = datetime.fromisoformat(
-        cert["not_before"].replace("Z","+00:00")
+# ===================================
+# HELPERS
+# ===================================
+
+def load_domains():
+
+    with open(INPUT_FILE) as f:
+        return [
+            d.strip().lower()
+            for d in f
+            if d.strip()
+        ]
+
+
+def cert_currently_valid(cert):
+
+    try:
+        nb = datetime.fromisoformat(
+            cert["not_before"].replace(
+                "Z","+00:00"
+            )
+        )
+
+        na = datetime.fromisoformat(
+            cert["not_after"].replace(
+                "Z","+00:00"
+            )
+        )
+
+        now = datetime.now(
+            timezone.utc
+        )
+
+        return nb <= now <= na
+
+    except Exception as e:
+
+        print(
+            "Date parse error:",
+            e
+        )
+
+        return False
+
+
+# ===================================
+# RETRYING FETCH
+# ===================================
+
+def fetch_domain(
+    domain,
+    retries=6
+):
+
+    url = (
+        "https://crt.sh/?q="
+        + urllib.parse.quote(domain)
+        + "&output=json"
     )
 
-    na = datetime.fromisoformat(
-        cert["not_after"].replace("Z","+00:00")
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent":
+            "Mozilla/5.0"
+        }
     )
 
-    now = datetime.now(timezone.utc)
+    delay = 5
 
-    return nb <= now <= na
+    for attempt in range(retries):
+
+        try:
+
+            print(
+                f"Fetching {domain} "
+                f"(attempt {attempt+1})"
+            )
+
+            with urllib.request.urlopen(
+                req,
+                timeout=90
+            ) as r:
+
+                return json.loads(
+                    r.read().decode()
+                )
+
+        except urllib.error.HTTPError as e:
+
+            if e.code in (502,504):
+
+                print(
+                    f"{e.code} retry "
+                    f"in {delay}s"
+                )
+
+                time.sleep(delay)
+
+                delay *= 2
+
+                continue
+
+            raise
+
+        except Exception as e:
+
+            print(
+                f"Error {e}, retry "
+                f"in {delay}s"
+            )
+
+            time.sleep(delay)
+
+            delay *= 2
+
+    print(
+        "Giving up on",
+        domain
+    )
+
+    return []
 
 
-url = (
-    "https://crt.sh/?q="
-    + urllib.parse.quote(domain)
-    + "&output=json"
-)
+# ===================================
+# CHECKPOINTING
+# ===================================
 
-print("Fetching", url)
+def load_checkpoint():
 
-with urllib.request.urlopen(url) as r:
-    rows = json.loads(r.read().decode())
+    if not os.path.exists(
+        CHECKPOINT_FILE
+    ):
+        return set()
 
-print("Rows returned:", len(rows))
+    with open(
+        CHECKPOINT_FILE
+    ) as f:
+
+        return set(
+            json.load(f)
+        )
 
 
-seen = set()
+def save_checkpoint(
+    processed
+):
 
-for cert in rows:
+    with open(
+        CHECKPOINT_FILE,
+        "w"
+    ) as f:
 
-    cert_id = cert["id"]
+        json.dump(
+            list(processed),
+            f
+        )
 
-    if cert_id in seen:
-        print("Duplicate cert:", cert_id)
-        continue
 
-    seen.add(cert_id)
+# ===================================
+# EXPORTS
+# ===================================
 
-    ca_id = int(cert["issuer_ca_id"])
+def export_results(
+    results
+):
 
-    # skip approved CAs
-    if ca_id in APPROVED_CA_IDS:
-        continue
+    # ----- JSON -----
 
-    # skip expired / not yet valid
-    if not cert_valid(cert):
-        continue
+    out = []
 
-    print()
-    print("VIOLATION FOUND")
-    print("Cert ID:", cert_id)
-    print("Issuer CA ID:", ca_id)
-    print("Issuer:", cert["issuer_name"])
-    print("Serial:", cert["serial_number"])
-    print("Valid from:", cert["not_before"])
-    print("Valid to:", cert["not_after"])
-    print("Domains:")
-    print(cert["name_value"])
+    for cid,data in results.items():
+
+        out.append({
+
+            "cert_id": cid,
+
+            "issuer":
+                data["issuer"],
+
+            "issuer_ca_id":
+                data["issuer_ca_id"],
+
+            "serial":
+                data["serial"],
+
+            "not_before":
+                data["not_before"],
+
+            "not_after":
+                data["not_after"],
+
+            "domains":
+                sorted(
+                    list(
+                        data["domains"]
+                    )
+                )
+        })
+
+    with open(
+        JSON_OUTPUT,
+        "w"
+    ) as f:
+
+        json.dump(
+            out,
+            f,
+            indent=2
+        )
+
+
+
+    # ----- CSV -----
+
+    all_domains = set()
+
+    with open(
+        CSV_OUTPUT,
+        "w",
+        newline=""
+    ) as f:
+
+        w = csv.writer(f)
+
+        w.writerow([
+            "cert_id",
+            "issuer",
+            "issuer_ca_id",
+            "serial",
+            "domain",
+            "not_before",
+            "not_after"
+        ])
+
+        for cid,data in results.items():
+
+            for domain in data["domains"]:
+
+                w.writerow([
+                    cid,
+                    data["issuer"],
+                    data["issuer_ca_id"],
+                    data["serial"],
+                    domain,
+                    data["not_before"],
+                    data["not_after"]
+                ])
+
+                all_domains.add(
+                    domain
+                )
+
+
+    # ----- TXT -----
+
+    with open(
+        TXT_OUTPUT,
+        "w"
+    ) as f:
+
+        for d in sorted(
+            all_domains
+        ):
+
+            f.write(
+                d + "\n"
+            )
+
+
+# ===================================
+# MAIN
+# ===================================
+
+def main():
+
+    domains = load_domains()
+
+    processed = load_checkpoint()
+
+    results = {}
+
+    print(
+        f"{len(domains)} domains loaded"
+    )
+
+    for i,domain in enumerate(
+        domains
+    ):
+
+        if domain in processed:
+
+            print(
+                "Skipping already done:",
+                domain
+            )
+
+            continue
+
+
+        print(
+            f"[{i+1}/{len(domains)}] "
+            f"{domain}"
+        )
+
+        rows = fetch_domain(
+            domain
+        )
+
+
+        seen_ids_this_domain = set()
+
+
+        for cert in rows:
+
+            cert_id = cert["id"]
+
+            # dedup duplicate rows
+            if cert_id in seen_ids_this_domain:
+                continue
+
+            seen_ids_this_domain.add(
+                cert_id
+            )
+
+
+            issuer_ca_id = int(
+                cert["issuer_ca_id"]
+            )
+
+
+            # skip approved CAs
+            if issuer_ca_id in APPROVED_CA_IDS:
+                continue
+
+
+            # only current certs
+            if not cert_currently_valid(
+                cert
+            ):
+                continue
+
+
+            # store cert once
+            if cert_id not in results:
+
+                results[cert_id] = {
+
+                    "issuer":
+                      cert["issuer_name"],
+
+                    "issuer_ca_id":
+                      issuer_ca_id,
+
+                    "serial":
+                      cert["serial_number"],
+
+                    "not_before":
+                      cert["not_before"],
+
+                    "not_after":
+                      cert["not_after"],
+
+                    "domains":
+                      set()
+                }
+
+
+            # add SAN names
+            names = cert[
+                "name_value"
+            ].split("\n")
+
+            for n in names:
+
+                results[
+                    cert_id
+                ]["domains"].add(
+                    n
+                )
+
+
+        processed.add(
+            domain
+        )
+
+        save_checkpoint(
+            processed
+        )
+
+        time.sleep(
+            SLEEP_BETWEEN_DOMAINS
+        )
+
+
+    export_results(
+        results
+    )
+
+    print(
+        "Done."
+    )
+
+
+
+if __name__ == "__main__":
+    main()
