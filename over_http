@@ -1,0 +1,30 @@
+domains.txt
+  ↓
+batch / loop (one domain at a time)
+  ↓
+https://crt.sh/?q=<domain>&output=json
+  ↓
+filter locally:
+   - valid cert only
+   - issuer not approved
+   - deduplicate by certificate ID
+  ↓
+JSON + CSV + TXT output
+
+
+import urllib.request
+import json
+
+domain = "example.com"
+
+url = f"https://crt.sh/?q={domain}&output=json"
+
+print("Fetching:", url)
+
+with urllib.request.urlopen(url, timeout=20) as r:
+    data = json.loads(r.read().decode())
+
+print("Returned rows:", len(data))
+
+if data:
+    print("Sample keys:", data[0].keys())
