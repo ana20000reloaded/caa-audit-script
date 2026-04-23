@@ -1,3 +1,7 @@
+print(rows[0]["not_before"])
+print(rows[0]["not_after"])
+
+
 """
 Annual CAA Audit via crt.sh HTTPS API
 
