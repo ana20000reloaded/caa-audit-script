@@ -1,17 +1,12 @@
-import socket
+import urllib.request
 
-HOST = "crt.sh"
-PORT = 5432
-
-print(f"Testing TCP connection to {HOST}:{PORT} ...")
+url = "https://crt.sh/"
 
 try:
-    s = socket.create_connection((HOST, PORT), timeout=10)
-    print("SUCCESS: Port is reachable")
-    s.close()
-
+    with urllib.request.urlopen(url, timeout=10) as r:
+        print("HTTPS works:", r.status)
 except Exception as e:
-    print("FAILED:", e)
+    print("HTTPS failed:", e)
 
 
 
