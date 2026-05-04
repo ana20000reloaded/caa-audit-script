@@ -1,26 +1,19 @@
-def write_list(filename, items):
+import sys
 
-    with open(filename,"w") as f:
-        for x in sorted(items):
-            f.write(x + "\n")
+class Tee(object):
+    def __init__(self, *files):
+        self.files = files
 
+    def write(self, obj):
+        for f in self.files:
+            f.write(obj)
+            f.flush()
 
-write_list(
-  "fetch_failed.txt",
-  fetch_failed
-)
+    def flush(self):
+        for f in self.files:
+            f.flush()
 
-write_list(
-  "no_certificates.txt",
-  no_certs
-)
+logfile = open("run.log", "w")
 
-write_list(
-  "no_violations.txt",
-  no_violations
-)
-
-write_list(
-  "domains_with_violations.txt",
-  domains_with_violations
-)
+sys.stdout = Tee(sys.stdout, logfile)
+sys.stderr = Tee(sys.stderr, logfile)
