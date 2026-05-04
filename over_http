@@ -1,4 +1,6 @@
+from datetime import datetime
 import sys
+
 
 class Tee(object):
     def __init__(self, *files):
@@ -7,13 +9,22 @@ class Tee(object):
     def write(self, obj):
         for f in self.files:
             f.write(obj)
-            f.flush()
+            f.flush()   # important: immediate write
 
     def flush(self):
         for f in self.files:
             f.flush()
 
-logfile = open("run.log", "w")
 
+# --- create timestamped logfile ---
+timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+
+log_filename = f"run_{timestamp}.log"
+
+logfile = open(log_filename, "w", buffering=1)  # line-buffered
+
+# --- redirect stdout/stderr ---
 sys.stdout = Tee(sys.stdout, logfile)
 sys.stderr = Tee(sys.stderr, logfile)
+
+print(f"Logging to {log_filename}")
